@@ -7,7 +7,7 @@ import streamlit as st
 # 1. KONFIGURASI HALAMAN STREAMLIT
 # ==========================================
 st.set_page_config(
-    page_title="Sistem Rekap Toko Modern",
+    page_title="Sistem Rekap Toko & Gaji",
     page_icon="🏪",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -18,7 +18,6 @@ st.set_page_config(
 # 2. INISIALISASI DATABASE SQLITE
 # ==========================================
 def get_connection():
-  # SQLite membuat database 'toko.db' secara otomatis di server
   conn = sqlite3.connect("toko.db", check_same_thread=False)
   return conn
 
@@ -33,9 +32,19 @@ def init_db():
             username TEXT PRIMARY KEY,
             password TEXT NOT NULL,
             role TEXT NOT NULL,
-            nama TEXT NOT NULL
+            nama TEXT NOT NULL,
+            gaji_dasar REAL DEFAULT 0,
+            persen_bonus REAL DEFAULT 0
         )
     """)
+
+  # Cek & Tambah Kolom Gaji jika DB lama sudah terbentuk
+  c.execute("PRAGMA table_info(users)")
+  columns = [col[1] for col in c.fetchall()]
+  if "gaji_dasar" not in columns:
+    c.execute("ALTER TABLE users ADD COLUMN gaji_dasar REAL DEFAULT 0")
+  if "persen_bonus" not in columns:
+    c.execute("ALTER TABLE users ADD COLUMN persen_bonus REAL DEFAULT 0")
 
   # Tabel Penjualan Harian
   c.execute("""
@@ -59,30 +68,29 @@ def init_db():
         )
     """)
 
-  # Buat Akun Default jika belum ada data
+  # Buat Akun Default jika belum ada
   c.execute("SELECT COUNT(*) FROM users")
   if c.fetchone()[0] == 0:
-    # Akun Admin/Owner (Password: admin123)
     c.execute(
-        "INSERT INTO users VALUES ('admin', 'admin123', 'admin', 'Owner"
-        " Toko')"
+        "INSERT INTO users (username, password, role, nama, gaji_dasar,"
+        " persen_bonus) VALUES ('admin', 'admin123', 'admin', 'Owner Toko', 0,"
+        " 0)"
     )
-    # Akun Karyawan (Password: karyawan123)
     c.execute(
-        "INSERT INTO users VALUES ('karyawan', 'karyawan123', 'karyawan', 'Staf"
-        " Kasir')"
+        "INSERT INTO users (username, password, role, nama, gaji_dasar,"
+        " persen_bonus) VALUES ('karyawan', 'karyawan123', 'karyawan', 'Staf"
+        " Kasir', 1500000, 2.5)"
     )
 
   conn.commit()
   conn.close()
 
 
-# Jalankan pembuat database
 init_db()
 
 
 # ==========================================
-# 3. FUNGSI OLAH DATA & AUTENTIKASI
+# 3. FUNGSI OLAH DATA
 # ==========================================
 def check_login(username, password):
   conn = get_connection()
@@ -137,6 +145,26 @@ def load_pengeluaran():
   return df
 
 
+def load_users():
+  conn = get_connection()
+  df = pd.read_sql_query(
+      "SELECT username, nama, role, gaji_dasar, persen_bonus FROM users", conn
+  )
+  conn.close()
+  return df
+
+
+def update_gaji_user(username, gaji_dasar, persen_bonus):
+  conn = get_connection()
+  c = conn.cursor()
+  c.execute(
+      "UPDATE users SET gaji_dasar = ?, persen_bonus = ? WHERE username = ?",
+      (gaji_dasar, persen_bonus, username),
+  )
+  conn.commit()
+  conn.close()
+
+
 def hapus_transaksi(tabel, id_transaksi):
   conn = get_connection()
   c = conn.cursor()
@@ -160,15 +188,9 @@ if "logged_in" not in st.session_state:
 # ==========================================
 if not st.session_state.logged_in:
   st.markdown(
-      "<h2 style='text-align: center;'>🏪 Sistem Rekap Penjualan Toko</h2>",
+      "<h2 style='text-align: center;'>🏪 Sistem Rekap Toko & Penggajian</h2>",
       unsafe_allow_html=True,
   )
-  st.markdown(
-      "<p style='text-align: center; color: gray;'>Masuk menggunakan akun Anda"
-      " untuk melanjutkan</p>",
-      unsafe_allow_html=True,
-  )
-
   col1, col2, col3 = st.columns([1, 2, 1])
   with col2:
     with st.form("login_form"):
@@ -185,7 +207,6 @@ if not st.session_state.logged_in:
           st.session_state.username = user_info[0]
           st.session_state.role = user_info[1]
           st.session_state.nama = user_info[2]
-          st.success(f"Selamat datang, {user_info[2]}!")
           st.rerun()
         else:
           st.error("Username atau Password salah!")
@@ -195,17 +216,17 @@ if not st.session_state.logged_in:
 # 6. HALAMAN UTAMA SETELAH LOGIN
 # ==========================================
 else:
-  # Sidebar Informasi & Menu
   st.sidebar.title(f"👤 {st.session_state.nama}")
   st.sidebar.caption(f"Role: **{st.session_state.role.upper()}**")
 
-  # Pembatasan Hak Akses Menu
+  # Navigasi berdasarkan Role
   if st.session_state.role == "admin":
     menu = st.sidebar.radio(
         "Navigasi Menu",
         [
             "📊 Dashboard & Laporan",
             "✍️ Form Input Transaksi",
+            "💵 Fitur Gaji & Bonus Karyawan",
             "⚙️ Kelola & Hapus Data",
         ],
     )
@@ -227,11 +248,7 @@ else:
   # --------------------------------------------------
   if menu == "✍️ Form Input Transaksi":
     st.title("✍️ Input Penjualan & Pengeluaran Toko")
-    tab1, tab2, tab3 = st.tabs([
-        "💰 Input Penjualan",
-        "🛒 Input Belanja Operasional",
-        "📋 Input Hari Ini",
-    ])
+    tab1, tab2 = st.tabs(["💰 Input Penjualan", "🛒 Input Belanja Operasional"])
 
     with tab1:
       st.subheader("Form Input Penjualan Harian")
@@ -243,153 +260,185 @@ else:
         ket_penjualan = st.text_input("Keterangan / Shift (Opsional)")
         btn_penjualan = st.form_submit_button("Simpan Penjualan")
 
-        if btn_penjualan:
-          if jumlah_penjualan > 0:
-            simpan_penjualan(
-                tgl_penjualan,
-                jumlah_penjualan,
-                ket_penjualan,
-                st.session_state.nama,
-            )
-            st.success("✅ Data penjualan berhasil tersimpan!")
-          else:
-            st.warning("Nominal penjualan harus lebih besar dari 0.")
+        if btn_penjualan and jumlah_penjualan > 0:
+          simpan_penjualan(
+              tgl_penjualan,
+              jumlah_penjualan,
+              ket_penjualan,
+              st.session_state.nama,
+          )
+          st.success("✅ Data penjualan berhasil tersimpan!")
 
     with tab2:
       st.subheader("Form Input Belanja / Biaya Operasional Toko")
       with st.form("form_pengeluaran", clear_on_submit=True):
         tgl_pengeluaran = st.date_input("Tanggal", value=date.today())
-        nama_item = st.text_input(
-            "Nama Pengeluaran (Contoh: Beli Token Listrik, Plastik, Kebersihan)"
-        )
+        nama_item = st.text_input("Nama Pengeluaran")
         jumlah_pengeluaran = st.number_input(
             "Total Biaya (Rp)", min_value=0.0, step=5000.0, format="%.0f"
         )
         btn_pengeluaran = st.form_submit_button("Simpan Pengeluaran")
 
-        if btn_pengeluaran:
-          if nama_item and jumlah_pengeluaran > 0:
-            simpan_pengeluaran(
-                tgl_pengeluaran,
-                nama_item,
-                jumlah_pengeluaran,
-                st.session_state.nama,
-            )
-            st.success("✅ Data pengeluaran berhasil tersimpan!")
-          else:
-            st.warning("Lengkapi nama item dan total biaya pengeluaran.")
-
-    with tab3:
-      st.subheader("Ringkasan Data yang Diinput Hari Ini")
-      df_p = load_penjualan()
-      df_e = load_pengeluaran()
-
-      today_str = str(date.today())
-      df_p_today = (
-          df_p[df_p["tanggal"] == today_str] if not df_p.empty else pd.DataFrame()
-      )
-      df_e_today = (
-          df_e[df_e["tanggal"] == today_str] if not df_e.empty else pd.DataFrame()
-      )
-
-      col_a, col_b = st.columns(2)
-      with col_a:
-        st.write("**Penjualan Hari Ini:**")
-        st.dataframe(df_p_today, use_container_width=True)
-      with col_b:
-        st.write("**Pengeluaran Hari Ini:**")
-        st.dataframe(df_e_today, use_container_width=True)
+        if btn_pengeluaran and nama_item and jumlah_pengeluaran > 0:
+          simpan_pengeluaran(
+              tgl_pengeluaran,
+              nama_item,
+              jumlah_pengeluaran,
+              st.session_state.nama,
+          )
+          st.success("✅ Data pengeluaran berhasil tersimpan!")
 
   # --------------------------------------------------
-  # MENU 2: DASHBOARD & LAPORAN (Khusus Admin/Owner)
+  # MENU 2: DASHBOARD (Khusus Admin/Owner)
   # --------------------------------------------------
   elif menu == "📊 Dashboard & Laporan":
-    st.title("📊 Laporan Finansial & Margin Laba/Rugi")
-
+    st.title("📊 Laporan Finansial Toko")
     df_p = load_penjualan()
     df_e = load_pengeluaran()
 
-    if df_p.empty and df_e.empty:
-      st.info("Belum ada data transaksi yang dapat ditampilkan.")
-    else:
-      # Hitung Ringkasan Finansial Total
-      tot_penjualan = df_p["jumlah"].sum() if not df_p.empty else 0
-      tot_pengeluaran = df_e["jumlah"].sum() if not df_e.empty else 0
-      laba_rugi = tot_penjualan - tot_pengeluaran
+    tot_p = df_p["jumlah"].sum() if not df_p.empty else 0
+    tot_e = df_e["jumlah"].sum() if not df_e.empty else 0
+    laba = tot_p - tot_e
 
-      # Ringkasan Metrics
-      c1, c2, c3 = st.columns(3)
-      c1.metric("Total Penjualan", f"Rp {tot_penjualan:,.0f}")
-      c2.metric("Total Pengeluaran", f"Rp {tot_pengeluaran:,.0f}")
-      c3.metric("Margin Laba / Rugi Net", f"Rp {laba_rugi:,.0f}")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total Penjualan", f"Rp {tot_p:,.0f}")
+    c2.metric("Total Pengeluaran", f"Rp {tot_e:,.0f}")
+    c3.metric("Margin Laba / Rugi", f"Rp {laba:,.0f}")
 
-      st.divider()
-
-      # Visualisasi Grafik Penjualan & Pengeluaran
-      st.subheader("📈 Grafik Perbandingan Penjualan vs Pengeluaran Harian")
-
-      if not df_p.empty:
-        df_p["tanggal"] = pd.to_datetime(df_p["tanggal"])
-      if not df_e.empty:
-        df_e["tanggal"] = pd.to_datetime(df_e["tanggal"])
-
-      p_daily = (
-          df_p.groupby("tanggal")["jumlah"].sum().reset_index()
-          if not df_p.empty
-          else pd.DataFrame(columns=["tanggal", "jumlah"])
-      )
-      e_daily = (
-          df_e.groupby("tanggal")["jumlah"].sum().reset_index()
-          if not df_e.empty
-          else pd.DataFrame(columns=["tanggal", "jumlah"])
-      )
-
-      merged = pd.merge(
-          p_daily,
-          e_daily,
-          on="tanggal",
-          how="outer",
-          suffixes=("_penjualan", "_pengeluaran"),
-      ).fillna(0)
-      merged = merged.rename(
-          columns={
-              "jumlah_penjualan": "Penjualan (Rp)",
-              "jumlah_pengeluaran": "Pengeluaran (Rp)",
-          }
-      )
-      merged = merged.set_index("tanggal")
-
-      # Tampilkan Line Chart Interaktif
-      st.line_chart(merged)
+    st.divider()
+    st.subheader("📈 Grafik Penjualan Harian")
+    if not df_p.empty:
+      df_p["tanggal"] = pd.to_datetime(df_p["tanggal"])
+      chart_data = df_p.groupby("tanggal")["jumlah"].sum()
+      st.line_chart(chart_data)
 
   # --------------------------------------------------
-  # MENU 3: KELOLA & HAPUS DATA (Khusus Admin/Owner)
+  # MENU 3: FITUR GAJI & BONUS (Khusus Admin/Owner)
+  # --------------------------------------------------
+  elif menu == "💵 Fitur Gaji & Bonus Karyawan":
+    st.title("💵 Manajemen Gaji & Bonus Karyawan")
+
+    tab_g1, tab_g2 = st.tabs(
+        ["⚙️ Pengaturan Gaji & Bonus", "🧾 Rekapitulasi Gaji Periode"]
+    )
+
+    # Tab 1: Setting Gaji Dasar dan Persentase Bonus
+    with tab_g1:
+      st.subheader("Atur Gaji Dasar & Bonus per Karyawan")
+      df_u = load_users()
+
+      # Tampilkan tabel daftar pengguna saat ini
+      st.dataframe(
+          df_u[
+              [
+                  "username",
+                  "nama",
+                  "role",
+                  "gaji_dasar",
+                  "persen_bonus",
+              ]
+          ].rename(
+              columns={
+                  "gaji_dasar": "Gaji Dasar (Rp)",
+                  "persen_bonus": "Bonus (%)",
+              }
+          ),
+          use_container_width=True,
+      )
+
+      st.markdown("---")
+      st.write("**Form Edit Gaji & Bonus:**")
+
+      user_list = df_u["username"].tolist()
+      selected_user = st.selectbox("Pilih Karyawan / User", options=user_list)
+
+      # Ambil nilai default user yang dipilih
+      current_data = df_u[df_u["username"] == selected_user].iloc[0]
+
+      with st.form("form_edit_gaji"):
+        new_gaji = st.number_input(
+            "Gaji Dasar (Rp)",
+            value=float(current_data["gaji_dasar"]),
+            step=50000.0,
+            format="%.0f",
+        )
+        new_bonus = st.number_input(
+            "Bonus Penjualan (%)",
+            value=float(current_data["persen_bonus"]),
+            min_value=0.0,
+            max_value=100.0,
+            step=0.5,
+        )
+        btn_save_gaji = st.form_submit_button("Simpan Pengaturan Gaji")
+
+        if btn_save_gaji:
+          update_gaji_user(selected_user, new_gaji, new_bonus)
+          st.success(
+              f"✅ Gaji & Bonus untuk {selected_user} berhasil diperbarui!"
+          )
+          st.rerun()
+
+    # Tab 2: Hitung Total Gaji berdasarkan Periode
+    with tab_g2:
+      st.subheader("Hitung Gaji & Bonus Penjualan")
+
+      col_t1, col_t2 = st.columns(2)
+      with col_t1:
+        tgl_awal = st.date_input("Dari Tanggal", value=date.today().replace(day=1))
+      with col_t2:
+        tgl_akhir = st.date_input("Sampai Tanggal", value=date.today())
+
+      # Filter Penjualan pada Rentang Tanggal
+      df_penjualan = load_penjualan()
+      if not df_penjualan.empty:
+        df_penjualan["tanggal"] = pd.to_datetime(df_penjualan["tanggal"]).dt.date
+        mask = (df_penjualan["tanggal"] >= tgl_awal) & (
+            df_penjualan["tanggal"] <= tgl_akhir
+        )
+        df_filtered = df_penjualan.loc[mask]
+        total_omset_periode = df_filtered["jumlah"].sum()
+      else:
+        total_omset_periode = 0.0
+
+      st.info(
+          f"📌 Total Omset Penjualan Toko ({tgl_awal} s/d {tgl_akhir}): **Rp"
+          f" {total_omset_periode:,.0f}**"
+      )
+
+      # Kalkulasi untuk setiap karyawan
+      df_users = load_users()
+      karyawan_list = df_users[df_users["role"] == "karyawan"]
+
+      hasil_gaji = []
+      for idx, row in karyawan_list.iterrows():
+        g_dasar = row["gaji_dasar"]
+        p_bonus = row["persen_bonus"]
+        nominal_bonus = (p_bonus / 100) * total_omset_periode
+        total_gaji = g_dasar + nominal_bonus
+
+        hasil_gaji.append({
+            "Nama Karyawan": row["nama"],
+            "Gaji Dasar (Rp)": f"{g_dasar:,.0f}",
+            "Bonus (%)": f"{p_bonus}%",
+            "Nominal Bonus (Rp)": f"{nominal_bonus:,.0f}",
+            "TOTAL GAJI (Rp)": f"{total_gaji:,.0f}",
+        })
+
+      st.write("### 📋 Rincian Slip Gaji Karyawan")
+      st.table(pd.DataFrame(hasil_gaji))
+
+  # --------------------------------------------------
+  # MENU 4: KELOLA & HAPUS DATA (Khusus Admin/Owner)
   # --------------------------------------------------
   elif menu == "⚙️ Kelola & Hapus Data":
-    st.title("⚙️ Hapus Data Transaksi (Koreksi Input)")
-
-    tab_h1, tab_h2 = st.tabs(["Data Penjualan", "Data Pengeluaran"])
-
-    with tab_h1:
-      df_p = load_penjualan()
-      st.dataframe(df_p, use_container_width=True)
-      if not df_p.empty:
-        id_del_p = st.number_input(
-            "Masukkan ID Penjualan yang ingin dihapus", min_value=1, step=1
-        )
-        if st.button("Hapus Data Penjualan", type="primary"):
-          hapus_transaksi("penjualan", id_del_p)
-          st.success(f"Data Penjualan ID {id_del_p} berhasil dihapus!")
-          st.rerun()
-
-    with tab_h2:
-      df_e = load_pengeluaran()
-      st.dataframe(df_e, use_container_width=True)
-      if not df_e.empty:
-        id_del_e = st.number_input(
-            "Masukkan ID Pengeluaran yang ingin dihapus", min_value=1, step=1
-        )
-        if st.button("Hapus Data Pengeluaran", type="primary"):
-          hapus_transaksi("pengeluaran", id_del_e)
-          st.success(f"Data Pengeluaran ID {id_del_e} berhasil dihapus!")
-          st.rerun()
+    st.title("⚙️ Hapus Data Transaksi")
+    df_p = load_penjualan()
+    st.dataframe(df_p, use_container_width=True)
+    if not df_p.empty:
+      id_del = st.number_input(
+          "Masukkan ID Penjualan yang dihapus", min_value=1, step=1
+      )
+      if st.button("Hapus Data"):
+        hapus_transaksi("penjualan", id_del)
+        st.success("Data berhasil dihapus!")
+        st.rerun()
