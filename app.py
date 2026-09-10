@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 import sqlite3
+from fpdf import FPDF
 import pandas as pd
 import streamlit as st
 
@@ -32,19 +33,9 @@ def init_db():
             username TEXT PRIMARY KEY,
             password TEXT NOT NULL,
             role TEXT NOT NULL,
-            nama TEXT NOT NULL,
-            gaji_per_hari REAL DEFAULT 0,
-            persen_bonus REAL DEFAULT 0
+            nama TEXT NOT NULL
         )
     """)
-
-  # Penyesuaian Kolom jika Database Lama Ada
-  c.execute("PRAGMA table_info(users)")
-  columns = [col[1] for col in c.fetchall()]
-  if "gaji_per_hari" not in columns:
-    c.execute("ALTER TABLE users ADD COLUMN gaji_per_hari REAL DEFAULT 0")
-  if "persen_bonus" not in columns:
-    c.execute("ALTER TABLE users ADD COLUMN persen_bonus REAL DEFAULT 0")
 
   # Tabel Penjualan Harian
   c.execute("""
@@ -68,18 +59,33 @@ def init_db():
         )
     """)
 
+  # Tabel Riwayat Slip Gaji (Tabel Baru)
+  c.execute("""
+        CREATE TABLE IF NOT EXISTS riwayat_gaji (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tanggal_simpan DATE NOT NULL,
+            nama_karyawan TEXT NOT NULL,
+            tgl_mulai DATE NOT NULL,
+            tgl_selesai DATE NOT NULL,
+            gaji_per_hari REAL NOT NULL,
+            jumlah_hari INTEGER NOT NULL,
+            total_gaji_pokok REAL NOT NULL,
+            persen_bonus REAL NOT NULL,
+            omset_periode REAL NOT NULL,
+            total_bonus REAL NOT NULL,
+            grand_total REAL NOT NULL
+        )
+    """)
+
   # Akun Default
   c.execute("SELECT COUNT(*) FROM users")
   if c.fetchone()[0] == 0:
     c.execute(
-        "INSERT INTO users (username, password, role, nama, gaji_per_hari,"
-        " persen_bonus) VALUES ('admin', 'admin123', 'admin', 'Owner Toko', 0,"
-        " 0)"
+        "INSERT INTO users VALUES ('admin', 'admin123', 'admin', 'Owner Toko')"
     )
     c.execute(
-        "INSERT INTO users (username, password, role, nama, gaji_per_hari,"
-        " persen_bonus) VALUES ('karyawan', 'karyawan123', 'karyawan', 'Staf"
-        " Kasir', 75000, 2.0)"
+        "INSERT INTO users VALUES ('karyawan', 'karyawan123', 'karyawan', 'Staf"
+        " Kasir')"
     )
 
   conn.commit()
@@ -90,7 +96,77 @@ init_db()
 
 
 # ==========================================
-# 3. FUNGSI OLAH DATA
+# 3. FUNGSI GENERATE PDF SLIP GAJI (UKURAN A6)
+# ==========================================
+def generate_pdf_slip(
+    nama,
+    tgl_mulai,
+    tgl_selesai,
+    gaji_harian,
+    hari_kerja,
+    total_pokok,
+    persen_bonus,
+    omset,
+    total_bonus,
+    grand_total,
+):
+  # Ukuran A6: 105 mm x 148 mm (Sesuai Standar Cetak Thermal / Portable)
+  pdf = FPDF(orientation="P", unit="mm", format="A6")
+  pdf.set_margins(8, 8, 8)
+  pdf.add_page()
+
+  # Header Toko
+  pdf.set_font("Helvetica", "B", 12)
+  pdf.cell(0, 6, "SLIP GAJI KARYAWAN", ln=1, align="C")
+  pdf.set_font("Helvetica", "", 8)
+  pdf.cell(0, 4, "REKAP TOKO OPERASIONAL", ln=1, align="C")
+  pdf.line(8, pdf.get_y() + 1, 97, pdf.get_y() + 1)
+  pdf.ln(3)
+
+  # Data Karyawan & Periode
+  pdf.set_font("Helvetica", "", 8)
+  pdf.cell(28, 4, "Nama Karyawan", ln=0)
+  pdf.cell(0, 4, f": {nama}", ln=1)
+  pdf.cell(28, 4, "Periode Kerja", ln=0)
+  pdf.cell(0, 4, f": {tgl_mulai} s/d {tgl_selesai}", ln=1)
+  pdf.ln(2)
+  pdf.line(8, pdf.get_y(), 97, pdf.get_y())
+  pdf.ln(2)
+
+  # Rincian Penghitungan Gaji
+  pdf.set_font("Helvetica", "B", 8)
+  pdf.cell(0, 4, "RINCIAN PEMBAYARAN", ln=1)
+  pdf.set_font("Helvetica", "", 8)
+
+  # 1. Gaji Pokok
+  pdf.cell(
+      52, 4, f"Gaji Pokok ({hari_kerja} hr x Rp {gaji_harian:,.0f})", ln=0
+  )
+  pdf.cell(0, 4, f"Rp {total_pokok:,.0f}", ln=1, align="R")
+
+  # 2. Bonus Omset
+  pdf.cell(52, 4, f"Bonus Omset ({persen_bonus}% x Rp {omset:,.0f})", ln=0)
+  pdf.cell(0, 4, f"Rp {total_bonus:,.0f}", ln=1, align="R")
+
+  pdf.ln(2)
+  pdf.line(8, pdf.get_y(), 97, pdf.get_y())
+  pdf.ln(2)
+
+  # Total Penerimaan Gaji
+  pdf.set_font("Helvetica", "B", 9)
+  pdf.cell(52, 5, "TOTAL DITERIMA", ln=0)
+  pdf.cell(0, 5, f"Rp {grand_total:,.0f}", ln=1, align="R")
+
+  pdf.ln(6)
+  pdf.set_font("Helvetica", "I", 7)
+  pdf.cell(0, 4, "Dokumen sah dihitung otomatis oleh sistem.", ln=1, align="C")
+  pdf.cell(0, 3, "Terima kasih atas kerja keras Anda!", ln=1, align="C")
+
+  return bytes(pdf.output())
+
+
+# ==========================================
+# 4. FUNGSI OLAH DATA
 # ==========================================
 def check_login(username, password):
   conn = get_connection()
@@ -129,6 +205,45 @@ def simpan_pengeluaran(tanggal, nama_item, jumlah, input_by):
   conn.close()
 
 
+def simpan_riwayat_gaji(
+    nama,
+    tgl_m,
+    tgl_s,
+    g_hari,
+    jml_h,
+    tot_pokok,
+    p_bonus,
+    omset,
+    tot_bonus,
+    g_total,
+):
+  conn = get_connection()
+  c = conn.cursor()
+  c.execute(
+      """
+        INSERT INTO riwayat_gaji (
+            tanggal_simpan, nama_karyawan, tgl_mulai, tgl_selesai, gaji_per_hari, 
+            jumlah_hari, total_gaji_pokok, persen_bonus, omset_periode, total_bonus, grand_total
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """,
+      (
+          date.today(),
+          nama,
+          tgl_m,
+          tgl_s,
+          g_hari,
+          jml_h,
+          tot_pokok,
+          p_bonus,
+          omset,
+          tot_bonus,
+          g_total,
+      ),
+  )
+  conn.commit()
+  conn.close()
+
+
 def load_penjualan():
   conn = get_connection()
   df = pd.read_sql_query("SELECT * FROM penjualan ORDER BY tanggal DESC", conn)
@@ -145,26 +260,13 @@ def load_pengeluaran():
   return df
 
 
-def load_users():
+def load_riwayat_gaji():
   conn = get_connection()
   df = pd.read_sql_query(
-      "SELECT username, nama, role, gaji_per_hari, persen_bonus FROM users",
-      conn,
+      "SELECT * FROM riwayat_gaji ORDER BY id DESC", conn
   )
   conn.close()
   return df
-
-
-def update_gaji_user(username, gaji_per_hari, persen_bonus):
-  conn = get_connection()
-  c = conn.cursor()
-  c.execute(
-      "UPDATE users SET gaji_per_hari = ?, persen_bonus = ? WHERE username ="
-      " ?",
-      (gaji_per_hari, persen_bonus, username),
-  )
-  conn.commit()
-  conn.close()
 
 
 def hapus_transaksi(tabel, id_transaksi):
@@ -176,7 +278,7 @@ def hapus_transaksi(tabel, id_transaksi):
 
 
 # ==========================================
-# 4. MANAJEMEN SESI
+# 5. MANAJEMEN SESI
 # ==========================================
 if "logged_in" not in st.session_state:
   st.session_state.logged_in = False
@@ -186,7 +288,7 @@ if "logged_in" not in st.session_state:
 
 
 # ==========================================
-# 5. HALAMAN LOGIN
+# 6. HALAMAN LOGIN
 # ==========================================
 if not st.session_state.logged_in:
   st.markdown(
@@ -215,7 +317,7 @@ if not st.session_state.logged_in:
 
 
 # ==========================================
-# 6. HALAMAN UTAMA SETELAH LOGIN
+# 7. HALAMAN UTAMA SETELAH LOGIN
 # ==========================================
 else:
   st.sidebar.title(f"👤 {st.session_state.nama}")
@@ -227,7 +329,7 @@ else:
         [
             "📊 Dashboard & Laporan",
             "✍️ Form Input Transaksi",
-            "💵 Fitur Gaji 2 Mingguan",
+            "💵 Fitur Hitung & Cetak Gaji",
             "⚙️ Kelola & Hapus Data",
         ],
     )
@@ -245,7 +347,7 @@ else:
     st.rerun()
 
   # --------------------------------------------------
-  # MENU 1: INPUT TRANSAKSI
+  # MENU 1: INPUT TRANSAKSI (Karyawan & Admin)
   # --------------------------------------------------
   if menu == "✍️ Form Input Transaksi":
     st.title("✍️ Input Penjualan & Pengeluaran Toko")
@@ -290,7 +392,7 @@ else:
           st.success("✅ Data pengeluaran berhasil tersimpan!")
 
   # --------------------------------------------------
-  # MENU 2: DASHBOARD
+  # MENU 2: DASHBOARD (Khusus Admin/Owner)
   # --------------------------------------------------
   elif menu == "📊 Dashboard & Laporan":
     st.title("📊 Laporan Finansial Toko")
@@ -314,169 +416,171 @@ else:
       st.line_chart(chart_data)
 
   # --------------------------------------------------
-  # MENU 3: FITUR GAJI 2 MINGGUAN (Sesuai Permintaan)
+  # MENU 3: FITUR HITUNG & CETAK GAJI (Khusus Admin)
   # --------------------------------------------------
-  elif menu == "💵 Fitur Gaji 2 Mingguan":
-    st.title("💵 Hitung Gaji 2 Mingguan & Bonus Karyawan")
+  elif menu == "💵 Fitur Hitung & Cetak Gaji":
+    st.title("💵 Form Penggajian & Cetak Slip Gaji")
 
     tab_g1, tab_g2 = st.tabs(
-        ["📝 Form Hitung Gaji 2 Mingguan", "⚙️ Master Tarif Harian & Bonus"]
+        ["📝 Form Pengisian Gaji", "📑 Riwayat Slip Gaji Tersimpan"]
     )
 
-    df_users = load_users()
-    karyawan_df = df_users[df_users["role"] == "karyawan"]
-
-    # TAB 1: FORM PENGISIAN GAJI INTERAKTIF
+    # TAB 1: FORM PENGISIAN GAJI MANUAL & CETAK PDF
     with tab_g1:
-      st.subheader("Form Hitung Gaji Karyawan (Per 2 Minggu)")
+      st.subheader("Pengisian Data Gaji Karyawan")
 
-      if karyawan_df.empty:
-        st.warning(
-            "Belum ada akun karyawan terdaftar. Tambahkan karyawan terlebih"
-            " dahulu."
-        )
-      else:
-        # 1. Pilih Nama Karyawan
-        karyawan_options = dict(
-            zip(karyawan_df["username"], karyawan_df["nama"])
-        )
-        selected_username = st.selectbox(
-            "Pilih Karyawan",
-            options=list(karyawan_options.keys()),
-            format_func=lambda x: karyawan_options[x],
-        )
+      # 1. Nama Karyawan (Input Manual)
+      nama_karyawan_input = st.text_input(
+          "1. Nama Karyawan (Isi Manual)",
+          placeholder="Masukkan nama lengkap karyawan...",
+      )
 
-        user_data = karyawan_df[
-            karyawan_df["username"] == selected_username
-        ].iloc[0]
+      # Periode Hari Kerja untuk Menghitung Omset
+      st.write("**Periode Hari Kerja (Untuk Menghitung Rekap Omset Toko):**")
+      col_d1, col_d2 = st.columns(2)
+      with col_d1:
+        default_start = date.today() - timedelta(days=13)
+        tgl_mulai = st.date_input("Dari Tanggal", value=default_start)
+      with col_d2:
+        tgl_selesai = st.date_input("Sampai Tanggal", value=date.today())
 
-        # 2. Periode Kerja 2 Minggu (Default 14 Hari Terakhir)
-        col_d1, col_d2 = st.columns(2)
-        with col_d1:
-          default_start = date.today() - timedelta(days=13)
-          tgl_mulai = st.date_input("Dari Tanggal", value=default_start)
-        with col_d2:
-          tgl_selesai = st.date_input("Sampai Tanggal", value=date.today())
+      col_f1, col_f2, col_f3 = st.columns(3)
 
-        st.markdown("---")
-
-        # 3. Input Nilai Gaji & Hari Kerja
-        col_f1, col_f2, col_f3 = st.columns(3)
-
-        with col_f1:
-          # Gaji per Hari (Diisi otomatis dari standar, namun bisa diubah manual)
-          gaji_harian_input = st.number_input(
-              "Gaji per Hari (Rp)",
-              value=float(user_data["gaji_per_hari"]),
-              step=5000.0,
-              format="%.0f",
-          )
-
-        with col_f2:
-          # Jumlah Hari Kerja
-          jumlah_hari_kerja = st.number_input(
-              "Jumlah Hari Kerja (2 Minggu)",
-              min_value=0,
-              max_value=14,
-              value=12,
-              step=1,
-          )
-
-        with col_f3:
-          # Persentase Bonus
-          persen_bonus_input = st.number_input(
-              "Bonus Penjualan (%)",
-              value=float(user_data["persen_bonus"]),
-              step=0.5,
-              format="%.1f",
-          )
-
-        # 4. Ambil Rekap Penjualan Harian pada Rentang Tanggal
-        df_penjualan = load_penjualan()
-        total_omset = 0.0
-
-        if not df_penjualan.empty:
-          df_penjualan["tanggal"] = pd.to_datetime(
-              df_penjualan["tanggal"]
-          ).dt.date
-          mask = (df_penjualan["tanggal"] >= tgl_mulai) & (
-              df_penjualan["tanggal"] <= tgl_selesai
-          )
-          df_periode = df_penjualan.loc[mask]
-          total_omset = df_periode["jumlah"].sum()
-
-        # 5. KALKULASI GAJI & BONUS
-        total_gaji_pokok = gaji_harian_input * jumlah_hari_kerja
-        total_nominal_bonus = (persen_bonus_input / 100) * total_omset
-        grand_total_gaji = total_gaji_pokok + total_nominal_bonus
-
-        # 6. RINGKASAN SLIP GAJI
-        st.markdown("### 🧾 Rincian Slip Gaji Periode")
-
-        st.info(
-            f"📍 **Omset Penjualan Toko ({tgl_mulai} s/d {tgl_selesai}):** Rp"
-            f" {total_omset:,.0f}"
+      # 2. Gaji Pokok per Hari & Jumlah Hari Kerja
+      with col_f1:
+        gaji_per_hari = st.number_input(
+            "2. Gaji Pokok per Hari (Rp)",
+            value=75000.0,
+            step=5000.0,
+            format="%.0f",
         )
 
-        res_c1, res_c2, res_c3 = st.columns(3)
-        res_c1.metric(
-            "Total Gaji Pokok",
-            f"Rp {total_gaji_pokok:,.0f}",
-            delta=f"{jumlah_hari_kerja} hari x Rp {gaji_harian_input:,.0f}",
-        )
-        res_c2.metric(
-            "Bonus Penjualan",
-            f"Rp {total_nominal_bonus:,.0f}",
-            delta=f"{persen_bonus_input}% dari Omset",
-        )
-        res_c3.metric(
-            "TOTAL GAJI DITERIMA",
-            f"Rp {grand_total_gaji:,.0f}",
-            delta="Gaji Pokok + Bonus",
+      with col_f2:
+        jumlah_hari_kerja = st.number_input(
+            "Jumlah Hari Kerja", min_value=0, value=12, step=1
         )
 
-    # TAB 2: MASTER TARIF DASAR (Atur Standar per Karyawan)
-    with tab_g2:
-      st.subheader("Atur Standar Tarif Harian & Persentase Bonus")
-      st.dataframe(
-          karyawan_df[
-              [
-                  "username",
-                  "nama",
-                  "gaji_per_hari",
-                  "persen_bonus",
-              ]
-          ].rename(
-              columns={
-                  "gaji_per_hari": "Gaji per Hari (Rp)",
-                  "persen_bonus": "Bonus Default (%)",
-              }
-          ),
-          use_container_width=True,
+      # 3. Persentase Bonus Omset
+      with col_f3:
+        persen_bonus = st.number_input(
+            "3. Persentase Bonus Omset (%)",
+            value=2.0,
+            step=0.5,
+            format="%.1f",
+        )
+
+      # Hitung Omset Toko Sesuai Periode Hari Kerja
+      df_penjualan = load_penjualan()
+      total_omset_periode = 0.0
+
+      if not df_penjualan.empty:
+        df_penjualan["tanggal"] = pd.to_datetime(
+            df_penjualan["tanggal"]
+        ).dt.date
+        mask = (df_penjualan["tanggal"] >= tgl_mulai) & (
+            df_penjualan["tanggal"] <= tgl_selesai
+        )
+        total_omset_periode = df_penjualan.loc[mask, "jumlah"].sum()
+
+      # Kalkulasi Otomatis
+      total_gaji_pokok = gaji_per_hari * jumlah_hari_kerja
+      total_bonus = (persen_bonus / 100) * total_omset_periode
+      grand_total_gaji = total_gaji_pokok + total_bonus
+
+      st.markdown("---")
+
+      # Ringkasan Hasil Kalkulasi
+      st.subheader("🧾 Ringkasan Hasil Gaji")
+      st.caption(
+          f"Omset Toko Terhitung ({tgl_mulai} s/d {tgl_selesai}): **Rp"
+          f" {total_omset_periode:,.0f}**"
+      )
+
+      res_c1, res_c2, res_c3 = st.columns(3)
+      res_c1.metric(
+          "Gaji Pokok",
+          f"Rp {total_gaji_pokok:,.0f}",
+          delta=f"{jumlah_hari_kerja} hari x Rp {gaji_per_hari:,.0f}",
+      )
+      res_c2.metric(
+          "Bonus Omset",
+          f"Rp {total_bonus:,.0f}",
+          delta=f"{persen_bonus}% x Omset",
+      )
+      res_c3.metric(
+          "TOTAL GAJI DITERIMA",
+          f"Rp {grand_total_gaji:,.0f}",
+          delta="Gaji Pokok + Bonus",
       )
 
       st.markdown("---")
-      with st.form("form_master_gaji"):
-        user_to_edit = st.selectbox(
-            "Pilih Karyawan yang Ingin Diatur",
-            options=list(karyawan_options.keys()),
-            format_func=lambda x: karyawan_options[x],
-        )
-        m_gaji = st.number_input(
-            "Standar Gaji per Hari (Rp)", min_value=0.0, step=5000.0
-        )
-        m_bonus = st.number_input(
-            "Standar Bonus (%)", min_value=0.0, max_value=100.0, step=0.5
-        )
-        btn_save_master = st.form_submit_button("Simpan Standar Baru")
 
-        if btn_save_master:
-          update_gaji_user(user_to_edit, m_gaji, m_bonus)
-          st.success("✅ Standar tarif harian & bonus berhasil diperbarui!")
-          st.rerun()
+      # 4 & 5. Tombol Simpan & Cetak PDF A6
+      col_btn1, col_btn2 = st.columns(2)
+
+      with col_btn1:
+        # 4. Tombol Simpan Ke Database
+        if st.button("💾 4. Simpan Slip Gaji", use_container_width=True):
+          if nama_karyawan_input.strip() == "":
+            st.warning("⚠️ Mohon isi nama karyawan terlebih dahulu!")
+          else:
+            simpan_riwayat_gaji(
+                nama_karyawan_input,
+                tgl_mulai,
+                tgl_selesai,
+                gaji_per_hari,
+                jumlah_hari_kerja,
+                total_gaji_pokok,
+                persen_bonus,
+                total_omset_periode,
+                total_bonus,
+                grand_total_gaji,
+            )
+            st.success("✅ Data slip gaji berhasil disimpan ke database!")
+
+      with col_btn2:
+        # 5. Tombol Cetak PDF A6 / Thermal
+        if nama_karyawan_input.strip() != "":
+          pdf_data = generate_pdf_slip(
+              nama_karyawan_input,
+              tgl_mulai,
+              tgl_selesai,
+              gaji_per_hari,
+              jumlah_hari_kerja,
+              total_gaji_pokok,
+              persen_bonus,
+              total_omset_periode,
+              total_bonus,
+              grand_total_gaji,
+          )
+
+          st.download_button(
+              label="🖨️ 5. Cetak PDF Slip Gaji (Ukuran A6)",
+              data=pdf_data,
+              file_name=(
+                  f"Slip_Gaji_{nama_karyawan_input.replace(' ', '_')}_{tgl_selesai}.pdf"
+              ),
+              mime="application/pdf",
+              use_container_width=True,
+          )
+        else:
+          st.button(
+              "🖨️ 5. Cetak PDF Slip Gaji (Isi Nama Dulu)",
+              disabled=True,
+              use_container_width=True,
+          )
+
+    # TAB 2: RIWAYAT GAJI TERSIMPAN
+    with tab_g2:
+      st.subheader("Tabel Riwayat Slip Gaji Tersimpan")
+      df_gaji = load_riwayat_gaji()
+      if df_gaji.empty:
+        st.info("Belum ada riwayat gaji yang disimpan.")
+      else:
+        st.dataframe(df_gaji, use_container_width=True)
 
   # --------------------------------------------------
-  # MENU 4: KELOLA & HAPUS DATA
+  # MENU 4: KELOLA & HAPUS DATA (Khusus Admin/Owner)
   # --------------------------------------------------
   elif menu == "⚙️ Kelola & Hapus Data":
     st.title("⚙️ Hapus Data Transaksi")
