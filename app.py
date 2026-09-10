@@ -111,7 +111,133 @@ def generate_pdf_slip(
     grand_total,
 ):
   # Ukuran A6: 105 mm x 148 mm (Sesuai Standar Cetak Thermal / Portable)
-  pdf = FPDF(orientation="P", unit="mm", format="A6")
+  pdf = FPDF(orientation="P", unit="mm", format=(105, 148))
+  pdf.set_margins(8, 8, 8)
+  pdf.add_page()
+
+  # Header Toko
+  pdf.set_font("Helvetica", "B", 12)
+  pdf.cell(0, 6, "SLIP GAJI KARYAWAN", ln=1, align="C")
+  pdf.set_font("Helvetica", "", 8)
+def generate_pdf_slip(
+    nama,
+    tgl_mulai,
+    tgl_selesai,
+    gaji_harian,
+    hari_kerja,
+    total_pokok,
+    persen_bonus,
+    omset,
+    total_bonus,
+    grand_total,
+):
+  # Ukuran A6: 105 mm x 148 mm (Sesuai Standar Cetak Thermal / Portable)
+  pdf = FPDF(orientation="P", unit="mm", format=(105, 148))
+  pdf.set_margins(8, 8, 8)
+  pdf.add_page()
+
+  # Header Toko
+  pdf.set_font("Helvetica", "B", 12)
+  pdf.cell(0, 6, "SLIP GAJI KARYAWAN", ln=1, align="C")
+  pdf.set_font("Helvetica", "", 8)
+def generate_pdf_slip(
+    nama,
+    tgl_mulai,
+    tgl_selesai,
+    gaji_harian,
+    hari_kerja,
+    total_pokok,
+    persen_bonus,
+    omset,
+    total_bonus,
+    grand_total,
+):
+  # Ukuran A6: 105 mm x 148 mm (Sesuai Standar Cetak Thermal / Portable)
+  pdf = FPDF(orientation="P", unit="mm", format=(105, 148))
+  pdf.set_margins(8, 8, 8)
+  pdf.add_page()
+
+  # Header Toko
+  pdf.set_font("Helvetica", "B", 12)
+  pdf.cell(0, 6, "SLIP GAJI KARYAWAN", ln=1, align="C")
+  pdf.set_font("Helvetica", "", 8)
+def generate_pdf_slip(
+    nama,
+    tgl_mulai,
+    tgl_selesai,
+    gaji_harian,
+    hari_kerja,
+    total_pokok,
+    persen_bonus,
+    omset,
+    total_bonus,
+    grand_total,
+):
+  # Ukuran A6: 105 mm x 148 mm (Sesuai Standar Cetak Thermal / Portable)
+  pdf = FPDF(orientation="P", unit="mm", format=(105, 148))
+  pdf.set_margins(8, 8, 8)
+  pdf.add_page()
+
+  # Header Toko
+  pdf.set_font("Helvetica", "B", 12)
+  pdf.cell(0, 6, "SLIP GAJI KARYAWAN", ln=1, align="C")
+  pdf.set_font("Helvetica", "", 8)
+def generate_pdf_slip(
+    nama,
+    tgl_mulai,
+    tgl_selesai,
+    gaji_harian,
+    hari_kerja,
+    total_pokok,
+    persen_bonus,
+    omset,
+    total_bonus,
+    grand_total,
+):
+  # Ukuran A6: 105 mm x 148 mm (Sesuai Standar Cetak Thermal / Portable)
+  pdf = FPDF(orientation="P", unit="mm", format=(105, 148))
+  pdf.set_margins(8, 8, 8)
+  pdf.add_page()
+
+  # Header Toko
+  pdf.set_font("Helvetica", "B", 12)
+  pdf.cell(0, 6, "SLIP GAJI KARYAWAN", ln=1, align="C")
+  pdf.set_font("Helvetica", "", 8)
+def generate_pdf_slip(
+    nama,
+    tgl_mulai,
+    tgl_selesai,
+    gaji_harian,
+    hari_kerja,
+    total_pokok,
+    persen_bonus,
+    omset,
+    total_bonus,
+    grand_total,
+):
+  # Ukuran A6: 105 mm x 148 mm (Sesuai Standar Cetak Thermal / Portable)
+  pdf = FPDF(orientation="P", unit="mm", format=(105, 148))
+  pdf.set_margins(8, 8, 8)
+  pdf.add_page()
+
+  # Header Toko
+  pdf.set_font("Helvetica", "B", 12)
+  pdf.cell(0, 6, "SLIP GAJI KARYAWAN", ln=1, align="C")
+  pdf.set_font("Helvetica", "", 8)
+def generate_pdf_slip(
+    nama,
+    tgl_mulai,
+    tgl_selesai,
+    gaji_harian,
+    hari_kerja,
+    total_pokok,
+    persen_bonus,
+    omset,
+    total_bonus,
+    grand_total,
+):
+  # Format A6 didefinisikan langsung dengan tuple (105 mm x 148 mm)
+  pdf = FPDF(orientation="P", unit="mm", format=(105, 148))
   pdf.set_margins(8, 8, 8)
   pdf.add_page()
 
